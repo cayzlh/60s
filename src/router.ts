@@ -23,7 +23,7 @@ import { serviceIP } from './modules/ip.module.ts'
 import { serviceKfc } from './modules/kfc.module.ts'
 import { serviceLuck } from './modules/luck/luck.module.ts'
 import { serviceLunar } from './modules/lunar/lunar.module.ts'
-import { serviceMaoyan } from './modules/maoyan/maoyan.module.ts'
+// import { serviceMaoyan } from './modules/maoyan/maoyan.module.ts'
 import { serviceNcm } from './modules/ncm.module.ts'
 import { serviceOG } from './modules/og.module.ts'
 import { serviceQQ } from './modules/qq.module.ts'
@@ -47,7 +47,7 @@ import { serviceMoyu } from './modules/moyu.module.ts'
 import { serviceFuelPrice } from './modules/fuel-price/fuel-price.module.ts'
 import { GoldPriceService } from './modules/gold-price.module.ts'
 import { serviceQuark } from './modules/quark.module.ts'
-import { serviceWhois } from './modules/whois.module.ts'
+// import { serviceWhois } from './modules/whois.module.ts'
 import { olympicsService } from './modules/olympics/olympics.module.ts'
 import { serviceDoubanWeekly } from './modules/douban-weekly.module.ts'
 import { serviceITNews } from './modules/it-news.module.ts'
@@ -110,16 +110,16 @@ appRouter.get('/rednote', serviceRednote.handle())
 appRouter.get('/dongchedi', serviceDongchedi.handle())
 appRouter.get('/moyu', serviceMoyu.handle())
 appRouter.get('/quark', serviceQuark.handle())
-appRouter.get('/whois', serviceWhois.handle())
+// appRouter.get('/whois', serviceWhois.handle())
 
 appRouter.get('/health', serviceHealth.handle())
 appRouter.get('/password', servicePassword.handle())
 appRouter.get('/password/check', servicePassword.handleCheck())
 
-appRouter.get('/maoyan/all/movie', serviceMaoyan.handleAllMovie())
-appRouter.get('/maoyan/realtime/movie', serviceMaoyan.handleRealtime('movie'))
-appRouter.get('/maoyan/realtime/tv', serviceMaoyan.handleRealtime('tv'))
-appRouter.get('/maoyan/realtime/web', serviceMaoyan.handleRealtime('web'))
+// appRouter.get('/maoyan/all/movie', serviceMaoyan.handleAllMovie())
+// appRouter.get('/maoyan/realtime/movie', serviceMaoyan.handleRealtime('movie'))
+// appRouter.get('/maoyan/realtime/tv', serviceMaoyan.handleRealtime('tv'))
+// appRouter.get('/maoyan/realtime/web', serviceMaoyan.handleRealtime('web'))
 
 appRouter.get('/hacker-news/new', serviceHackerNews.handle('top'))
 appRouter.get('/hacker-news/top', serviceHackerNews.handle('top'))
@@ -167,7 +167,7 @@ appRouter.get('/beta/qq/profile', serviceQQ.handle())
 // === 以下接口为兼容保留，未来大版本移除 ===
 appRouter.get('/exchange_rate', serviceExRate.handle())
 appRouter.get('/today_in_history', serviceTodayInHistory.handle())
-appRouter.get('/maoyan', serviceMaoyan.handleAllMovie())
+// appRouter.get('/maoyan', serviceMaoyan.handleAllMovie())
 appRouter.get('/baidu/realtime', serviceBaidu.handleHotSearch())
 appRouter.get('/weather', serviceWeather.handle())
 appRouter.get('/ncm-rank', serviceNcm.handleRank())
