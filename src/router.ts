@@ -2,6 +2,7 @@ import { Router } from '@oak/oak/router'
 import { Common } from './common.ts'
 
 import { service60s } from './modules/60s.module.ts'
+import { blogRebuild } from './modules/blog-rebuild.module.ts'
 import { service60sRss } from './modules/60s-rss.module.ts'
 import { serviceAINews } from './modules/ai-news.module.ts'
 import { serviceAnswer } from './modules/answer/answer.module.ts'
@@ -80,6 +81,12 @@ export const appRouter = new Router({
 // === 以下为已发布的正式接口 ===
 appRouter.get('/60s', service60s.handle())
 appRouter.get('/60s/rss', service60sRss.handle())
+
+// 博客资讯页重建巡检：只读探针，方便从外部确认现在到底哪一步没跟上。
+// 不提供手动触发，避免被误用成公开的构建开关。
+appRouter.get('/60s/rebuild', async (ctx) => {
+  ctx.response.body = Common.buildJson(await blogRebuild.inspect())
+})
 appRouter.get('/answer', serviceAnswer.handle())
 appRouter.get('/baike', serviceBaike.handle())
 appRouter.get('/bili', serviceBili.handle())
