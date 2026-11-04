@@ -34,11 +34,37 @@ const MAX_ATTEMPTS_PER_DAY = 3
 const MIN_INTERVAL_MS = 15 * 60 * 1000
 /** 页面回读超时 */
 const PROBE_TIMEOUT_MS = 8_000
+/** 上游健康度回溯：今天没数据时，往回最多查几天 */
+const UPSTREAM_LOOKBACK_DAYS = 3
+/** 上游滞后超过几天算不健康（留一天缓冲，容忍偶发晚点） */
+const UPSTREAM_TOLERANCE_DAYS = 1
 
 interface ProbeState {
   date: string
   attempts: number
   lastAt: number
+}
+
+interface UpstreamHealth {
+  /** 最近一个有数据的期号；全回溯失败时为 null */
+  latest: string | null
+  /** 距今滞后几天；latest 为 null 时为 null */
+  lagDays: number | null
+  /** 是否健康（滞后在容忍范围内） */
+  healthy: boolean
+}
+
+/** 日期加减（只处理 YYYY-MM-DD，按 UTC 算，不受宿主时区影响） */
+function shiftDate(ymd: string, days: number): string {
+  const d = new Date(ymd + 'T00:00:00Z')
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+/** 两个 YYYY-MM-DD 相差几天（a - b） */
+function dayDiff(a: string, b: string): number {
+  const ms = new Date(a + 'T00:00:00Z').getTime() - new Date(b + 'T00:00:00Z').getTime()
+  return Math.round(ms / 86_400_000)
 }
 
 class BlogRebuild {
@@ -79,6 +105,69 @@ class BlogRebuild {
     } catch {
       return null
     }
+  }
+
+  /**
+   * 探指定日期的数据文件是否存在（用于「上游最近生产到哪一天」）。
+   *
+   * 只发 HEAD，不下载正文 —— 健康度检查每天要问好几次，没必要拉全量。
+   */
+  async #hasData(date: string): Promise<boolean> {
+    try {
+      const response = config.blogRebuild.upstreamUrl
+        ? await fetch(config.blogRebuild.upstreamUrl.replace('{date}', date), {
+            method: 'HEAD',
+            headers: { 'User-Agent': Common.chromeUA },
+          })
+        : await Common.tryRepoUrl({
+            repo: 'vikiboss/60s-static-host',
+            path: `static/60s/${date}.json`,
+            alternatives: [
+              `https://60s-static.viki.moe/60s/${date}.json`,
+              `https://60s-static-host.vercel.app/60s/${date}.json`,
+            ],
+          })
+      return !!response?.ok
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * 上游健康度：最近生产到哪一天、滞后今天多少天。
+   *
+   * 背景：上游靠 vikiboss/60s-static-host 的 GitHub Actions 每天 05:31~05:39
+   * 发刊。它一旦挂了，我们这边什么都做不了 —— 重建出来还是旧数据。但用户
+   * 看到的现象和「我们构建晚了」一模一样，所以必须能区分开。
+   *
+   * 契约：upstreamDate 为空时（今天没发），往回找最近一个有数据的日期。
+   * 最多回溯 UPSTREAM_LOOKBACK_DAYS 天，避免每次巡检都打一堆请求。
+   */
+  async upstreamHealth(): Promise<UpstreamHealth> {
+    const today = this.today()
+
+    // 先看今天 —— 最常见的情况，一次请求就够
+    const todayDate = await this.#upstreamDate()
+    if (todayDate) {
+      return { latest: todayDate, lagDays: 0, healthy: true }
+    }
+
+    // 今天没有 → 往回找最近一个可用日期
+    for (let back = 1; back <= UPSTREAM_LOOKBACK_DAYS; back++) {
+      const date = shiftDate(today, -back)
+      if (await this.#hasData(date)) {
+        const lagDays = back
+        return {
+          latest: date,
+          lagDays,
+          // 允许一天的自然波动（上游偶发晚点），超过就认为不健康
+          healthy: lagDays <= UPSTREAM_TOLERANCE_DAYS,
+        }
+      }
+    }
+
+    // 全部回溯都失败 → 上游彻底异常
+    return { latest: null, lagDays: null, healthy: false }
   }
 
   /** 回读博客资讯页，取出页面上的期号 */
@@ -145,7 +234,16 @@ class BlogRebuild {
   }
 
   /**
-   * 执行一次巡检：上游数据已就绪 + 页面还是旧期号 → 触发重建。
+   * 执行一次巡检。
+   *
+   * 两种情况会触发重建：
+   *   A. 上游今天已发 + 页面还没跟上      → 补构建
+   *   B. 上游今天没发、但页面连「上游最近可用的那一期」都没跟上
+   *                                      → 也补构建（上游晚发时仍有价值）
+   *
+   * 情况 B 是这次新增的：上游偶尔整天不发（2026-11-04 就发生过），
+   * 若只认「今天」，页面会一直停在更早的版本，且探针显示 stale:false
+   * 让人误以为一切正常。
    *
    * @returns 是否真的触发了重建（便于区分「没必要」和「已触发」）
    */
@@ -159,11 +257,20 @@ class BlogRebuild {
     if (state.attempts >= MAX_ATTEMPTS_PER_DAY) return false
     if (now - state.lastAt < MIN_INTERVAL_MS) return false
 
-    // 1. 上游今天的数据发了吗？没发就没什么可做的
-    const upstream = await this.#upstreamDate()
-    if (upstream !== today) return false
+    // 1. 上游生产到哪一天了？
+    const upstream = await this.upstreamHealth()
 
-    // 2. 博客页面已经是今天的期号了吗？是就不用动
+    if (!upstream.healthy) {
+      // 上游自己出问题了 —— 我们重建也没用，但要让日志里看得见
+      const lag = upstream.lagDays === null ? '未知（回溯全失败）' : `${upstream.lagDays} 天`
+      console.warn(`[blog-rebuild] 上游异常：最近可用 ${upstream.latest ?? '无'}，滞后 ${lag}`)
+      return false
+    }
+
+    // 没有可用基准（连昨天都没有）→ 无从判断，别乱触发
+    if (!upstream.latest) return false
+
+    // 2. 页面跟上「上游最近可用版本」了吗？
     const pageDate = await this.#pageDate()
 
     // 页面期号读不到（站点挂了/结构改了）→ 不贸然触发，留日志观察
@@ -171,14 +278,18 @@ class BlogRebuild {
       console.warn('[blog-rebuild] 无法读取页面期号，跳过')
       return false
     }
-    if (pageDate >= today) return false
+    if (pageDate >= upstream.latest) return false
 
-    // 3. 数据比页面新 → 补一次构建
+    // 3. 页面落后 → 补一次构建
     state.attempts++
     state.lastAt = Date.now()
     this.#state.set(today, state)
 
-    console.log(`[blog-rebuild] 数据已到 ${today}，页面还停在 ${pageDate}，触发第 ${state.attempts} 次重建`)
+    const behind = dayDiff(upstream.latest, pageDate)
+    console.log(
+      `[blog-rebuild] 上游最新 ${upstream.latest}，页面停在 ${pageDate}（落后 ${behind} 天），` +
+        `触发第 ${state.attempts} 次重建`,
+    )
 
     const ok = await this.#dispatch()
     if (!ok) {
@@ -201,14 +312,26 @@ class BlogRebuild {
   /** 只读探针：报告上游与页面的期号，不触发任何副作用 */
   async inspect() {
     const today = this.today()
-    const [upstream, page] = await Promise.all([this.#upstreamDate(), this.#pageDate()])
+    const [upstream, page] = await Promise.all([this.upstreamHealth(), this.#pageDate()])
+
     return {
       enabled: config.blogRebuild.enable,
       today,
-      upstreamDate: upstream,
+      /** 上游最近一个可用的期号（今天没发时是往回的日期） */
+      upstreamDate: upstream.latest,
+      /** 上游滞后今天几天；0 = 今天已发 */
+      upstreamLagDays: upstream.lagDays,
+      /** 上游是否健康；false 表示等多久都没用，得去源头看 */
+      upstreamHealthy: upstream.healthy,
+      /** 博客页面当前的期号 */
       pageDate: page,
-      // 与 check() 的判断口径保持一致
-      stale: !!(upstream === today && page !== null && page < today),
+      /**
+       * 是否需要重建：上游今天已发 + 页面还没跟上。
+       * 注意上游没发时这里一定是 false —— 重建也没用。
+       */
+      stale: !!(upstream.latest === today && page !== null && page < today),
+      /** 页面落后上游最近可用版本的期数（含上游未发的情况） */
+      pageBehindDays: page && upstream.latest ? dayDiff(page, upstream.latest) : null,
       states: Array.from(this.#state.values()),
     }
   }
