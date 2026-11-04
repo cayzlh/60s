@@ -10,3 +10,9 @@ enabled = true
 # 之前用于「资讯页重建巡检」的 cron 与 scheduled handler 已移除：
 # 博客构建改由 GitHub Actions 的定时任务驱动（见 cayzlh/blog-framework），
 # 这样也能把 Workers 免费版有限的 Cron Trigger 配额留给别的项目。
+
+# 显式清空 cron。仅删除 [triggers] 段并不会移除已部署的 schedule ——
+# 按 CF 文档，wrangler 部署时若 crons 为 undefined 则保留线上原有触发器，
+# 必须显式给一个空数组才会真正删除。
+[triggers]
+crons = []
