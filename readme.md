@@ -99,9 +99,6 @@ npm install && node --experimental-strip-types node.ts
 
 ### ☁️ 云端部署
 
-> **本 fork 的额外改动**：新增博客资讯页重建巡检，见下方
-> [博客资讯页重建巡检](#-博客资讯页重建巡检可选)。
-
 **Cloudflare Workers**
 
 方式一，使用 Workers 的可视化界面：
@@ -130,89 +127,6 @@ npm install && npx wrangler publish
 - **更新频率**: 每日自动更新
 
 > 可视化架构图: [60s 更新策略 - Excalidraw](https://excalidraw.com/#json=VRffPBlMuFBkOlTbGe7IH,0C6yClfLME65ZhmQ30ywdg)
-
----
-
-## 🔁 博客资讯页重建巡检（可选）
-
-本 fork 额外加了一个**默认关闭**的能力：当天资讯已就绪、而博客的 `/news/`
-页还挂着前一天内容时，主动触发一次博客重建。
-
-### 为什么需要
-
-博客的 `/news/` 是构建期静态页，页面期号 = 构建那一刻的日期，靠
-GitHub Actions 的 `schedule` 每天重建。但 Actions 的 schedule 并不守时
-—— 对 122 次触发采样，中位延迟 **+126 分钟**，84% 超过 1 小时，最晚近
-16 小时。于是每天上午页面上都是昨天的资讯。
-
-而本服务**没有「发刊成功」这个事件点**：它只是 `vikiboss/60s-static-host`
-里静态 JSON 的只读代理，不抓取、不写数据。发刊发生在别的仓库，钩不上。
-所以改成反向巡检：比对「数据好了没」和「页面更新了没」。
-
-### 怎么判断
-
-```
-上游今天的 JSON 就绪？ ── 否 ──> 什么都不做
-        │是
-博客页面期号 == 今天？ ── 是 ──> 什么都不做
-        │否
-     dispatch 一次重建
-```
-
-页面期号通过回读 `/news/` HTML 里的 `var pageDate = 'YYYY-MM-DD'` 取得
-（见主题仓库 `themes/polaris/layout/daily.ejs`），带随机串绕过 CDN 缓存。
-
-### 启用方式
-
-```bash
-# 1. 细粒度 PAT：仅 blog-framework 仓库，Contents:Read + Actions:Write
-npx wrangler secret put BLOG_DISPATCH_TOKEN
-
-# 2. 打开开关
-npx wrangler secret put BLOG_AUTO_REBUILD   # 值为 1
-```
-
-可选变量：
-
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `BLOG_REPO` | `cayzlh/blog-framework` | 目标仓库 |
-| `BLOG_EVENT_TYPE` | `Hexo` | 与目标 workflow 的 `repository_dispatch.types` 对应 |
-| `BLOG_SITE_URL` | `https://www.cayzlh.com/news/` | 用于回读页面期号 |
-
-触发时机在 `wrangler.toml` 的 `[triggers]`，从北京 05:10 起每 30 分钟一次，
-覆盖到 12:40。只配了 **1 条** cron 表达式 —— Workers 免费版每账号只允许
-5 个 Cron Trigger。
-
-### 防重复
-
-- 同一天最多触发 3 次
-- 两次触发至少间隔 15 分钟（构建 + 部署 + CDN 传播约 5~10 分钟）
-- 页面期号一旦追平就自动静默
-- 目标仓库的 workflow 另有 `concurrency` 串行化兜底
-
-### 只读探针
-
-```bash
-curl https://glance.cayzlh.com/v2/60s/rebuild
-```
-
-```json
-{ "enabled": true, "today": "2026-11-01",
-  "upstreamDate": "2026-11-01", "pageDate": "2026-11-01",
-  "stale": false, "states": [] }
-```
-
-`stale: true` 表示数据比页面新 —— 这正是会触发重建的状态。
-
-### 测试
-
-```bash
-node --experimental-strip-types --disable-warning=ExperimentalWarning test/blog-rebuild.ts
-```
-
-用本地 HTTP 服务同时扮演数据源与 GitHub API，覆盖「上游未发刊 / 页面已最新 /
-页面落后 / 重复巡检 / 期号解析失败」五种情况。
 
 ---
 

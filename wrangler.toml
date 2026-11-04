@@ -6,17 +6,7 @@ compatibility_flags = [ "nodejs_compat" ]
 [observability.logs]
 enabled = true
 
-# ── 博客资讯页重建巡检 ──────────────────────────────────────────
-# 上游 vikiboss/60s-static-host 通常在北京 05:31~05:39 发布当天数据，但并非
-# 保证 —— 2026-11-04 上游整天没发，页面就一直停在 11-03。所以巡检改成
-# **全天覆盖**，不再只守早上那几个小时。
-#
-# 每 30 分钟一次，一天 48 次。绝大多数会在「上游没发 / 页面已最新」这两步
-# 直接返回，成本接近于零；只有真需要重建时才发 dispatch（每天最多 3 次）。
-#
-# 只配 1 条表达式：Workers 免费版每账号只允许 5 个 Cron Trigger，
-# 拆成十几条会直接超限。
-#
-# 分钟取 10/40 而非 0/30：避开整点，错开上游与 GitHub 的自身调度高峰。
-[triggers]
-crons = [ "10,40 * * * *" ]
+# 本 Worker 只对外提供只读 API，没有任何定时任务。
+# 之前用于「资讯页重建巡检」的 cron 与 scheduled handler 已移除：
+# 博客构建改由 GitHub Actions 的定时任务驱动（见 cayzlh/blog-framework），
+# 这样也能把 Workers 免费版有限的 Cron Trigger 配额留给别的项目。
