@@ -8,7 +8,7 @@ enabled = true
 
 # 本 Worker 只对外提供只读 API，没有任何定时任务。
 # 之前用于「资讯页重建巡检」的 cron 与 scheduled handler 已移除：
-# 博客构建改由 GitHub Actions 的定时任务驱动（见 cayzlh/blog-framework），
+# 博客构建改由 GitHub Actions 的定时任务驱动（见 cayzlh/blog-shell），
 # 这样也能把 Workers 免费版有限的 Cron Trigger 配额留给别的项目。
 
 # 显式清空 cron。仅删除 [triggers] 段并不会移除已部署的 schedule ——
